@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: go
-          image: gusionling/gdg-soongsil-app:1.2
+          image: gusionling/gdg-soongsil-app:d8524c55-d729-4d2d-bfb6-e50d008cd9de
           ports:
             - containerPort: 8080
           resources:
