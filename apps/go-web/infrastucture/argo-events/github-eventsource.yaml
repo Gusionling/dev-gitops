@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: github-webhook
+  namespace: argo-events
+spec:
+  service:
+    ports:
+    - port: 12000
+      targetPort: 12000
+  github:
+    go-app:
+      repositories:
+      - owner: Gusionling
+        names:
+        - go-web-source
+      webhook:
+        endpoint: /push
+        port: "12000"
+        method: POST
+      events:
+      - push
+      apiToken:
+        name: github-access
+        key: token
+      webhookSecret:
+        name: github-access
+        key: secret
+
+
+
+        

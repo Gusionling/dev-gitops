@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: EventBus
+metadata:
+  name: default
+  namespace: argo-events
+spec:
+  nats:
+    native:
+      replicas: 1              
+      auth: none
+      containerTemplate:
+        resources:
+          requests:
+            cpu: 50m           
+            memory: 64Mi       
+          limits:
+            cpu: 100m
+            memory: 128Mi
+      metricsContainerTemplate:
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
