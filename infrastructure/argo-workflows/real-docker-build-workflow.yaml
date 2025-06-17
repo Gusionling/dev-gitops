@@ -1,0 +1,171 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: real-ci-pipeline
+  namespace: argo
+spec:
+  entrypoint: ci-pipeline
+  
+  arguments:
+    parameters:
+    - name: repo-url
+      value: "https://github.com/Gusionling/go-web-source"
+    - name: image-name
+      value: "gusionling/gdg-soongsil-app"
+    - name: image-tag
+      value: "{{workflow.uid}}"  # 고유한 태그 사용
+  
+  templates:
+  - name: ci-pipeline
+    steps:
+    - - name: git-clone
+        template: real-git-clone-step
+        arguments:
+          parameters:
+          - name: repo-url
+            value: "{{workflow.parameters.repo-url}}"
+    
+    - - name: docker-build
+        template: real-docker-build-step
+        arguments:
+          parameters:
+          - name: repo-url
+            value: "{{workflow.parameters.repo-url}}"
+          - name: image-name
+            value: "{{workflow.parameters.image-name}}"
+          - name: image-tag
+            value: "{{workflow.parameters.image-tag}}"
+    
+    - - name: update-gitops
+        template: update-gitops-step
+        arguments:
+          parameters:
+          - name: image-name
+            value: "{{workflow.parameters.image-name}}"
+          - name: image-tag
+            value: "{{workflow.parameters.image-tag}}"
+
+  # 1. 실제 Git Clone
+  - name: real-git-clone-step
+    inputs:
+      parameters:
+      - name: repo-url
+    container:
+      image: alpine/git:latest
+      command: [sh, -c]
+      args: 
+      - |
+        echo "🔄 Cloning repository: {{inputs.parameters.repo-url}}"
+        git clone {{inputs.parameters.repo-url}} /workspace
+        cd /workspace
+        echo "✅ Repository cloned successfully"
+        echo "📁 Files in repository:"
+        ls -la
+        echo "📋 Dockerfile content:"
+        cat Dockerfile || echo "No Dockerfile found"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 50m
+          memory: 64Mi
+
+  # 2. 실제 Docker Build with Kaniko
+  - name: real-docker-build-step
+    inputs:
+      parameters:
+      - name: repo-url
+      - name: image-name
+      - name: image-tag
+    container:
+      image: gcr.io/kaniko-project/executor:latest
+      command: [/kaniko/executor]
+      args:
+        - --context=git://github.com/Gusionling/go-web-source.git
+        - --dockerfile=Dockerfile
+        - --destination={{inputs.parameters.image-name}}:{{inputs.parameters.image-tag}}
+        - --cache=true
+        - --compressed-caching=false
+        - --single-snapshot
+        - --cleanup
+        - --verbosity=info
+      env:
+      - name: DOCKER_CONFIG
+        value: /kaniko/.docker
+      volumeMounts:
+      - name: docker-config
+        mountPath: /kaniko/.docker
+        readOnly: true
+      resources:
+        requests:
+          cpu: 50m          # 100m → 50m
+          memory: 128Mi     # 256Mi → 128Mi
+        limits:
+          cpu: 200m         # 500m → 200m
+          memory: 512Mi     # 1Gi → 512Mi
+
+  # 3. GitOps 업데이트
+  - name: update-gitops-step
+    inputs:
+      parameters:
+      - name: image-name
+      - name: image-tag
+    container:
+      image: alpine/git:latest
+      command: [sh, -c]
+      args:
+      - |
+        echo "🚀 Updating GitOps repository..."
+        
+        # Git 설정
+        git config --global user.name "ArgoCD Bot"
+        git config --global user.email "argocd-bot@example.com"
+        
+        # GitOps 레포 클론
+        git clone https://$GITHUB_TOKEN@github.com/Gusionling/dev-gitops.git /gitops
+        cd /gitops
+        
+        # 이미지 태그 업데이트
+        echo "📝 Current deploy.yaml:"
+        cat manifests/go-web/deploy.yaml
+        
+        echo "🔄 Updating image tag to: {{inputs.parameters.image-name}}:{{inputs.parameters.image-tag}}"
+        sed -i 's|image:.*|image: {{inputs.parameters.image-name}}:{{inputs.parameters.image-tag}}|' manifests/go-web/deploy.yaml
+        
+        echo "📝 Updated deploy.yaml:"
+        cat manifests/go-web/deploy.yaml
+        
+        # 변경사항 커밋 & 푸시
+        git add manifests/go-web/deploy.yaml
+        git commit -m "🤖 Auto-update image to {{inputs.parameters.image-name}}:{{inputs.parameters.image-tag}}"
+        git push origin main
+        
+        echo "✅ GitOps repository updated successfully!"
+      env:
+      - name: GITHUB_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: github-access
+            key: token
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 50m
+          memory: 64Mi
+
+  # Volumes
+  volumes:
+  - name: workspace
+    emptyDir: {}
+  - name: docker-config
+    secret:
+      secretName: dockerhub-registry
+      items:
+      - key: .dockerconfigjson
+        path: config.json
